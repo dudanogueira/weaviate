@@ -1,5 +1,6 @@
 name: Create a new issue
 description: Create a new issue to suggest improvements in the docs or the website
+labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
@@ -18,10 +19,20 @@ body:
         - label: I have read and agree to the Weaviate's [Contributor Guide](https://weaviate.io/developers/contributor-guide) and [Code of Conduct](https://weaviate.io/service/code-of-conduct)
           required: true
 
-  - type: textarea
+  - type: input
+    id: server_version
     attributes:
       label: Server Version
       description: |
-        - What Weaviate Server are you running?
+        - What Weaviate Version are you running?
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue_body
+    attributes:
+      label: Describe your issue
+      description: |
+        - What was the expected behavior? How it is behaving? Can you replicate it in latest version? Paste logs, context information (client version? environment variables?) or instruction on how to reproduce this issue here.
     validations:
       required: true
