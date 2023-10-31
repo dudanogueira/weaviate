@@ -1,5 +1,5 @@
 name: Create a new issue
-description: Create a new issue to suggest improvements in the docs or the website
+description: Create a new issue to Weaviate Server
 labels: ["bug", "triage"]
 body:
   - type: markdown
