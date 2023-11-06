@@ -8,7 +8,7 @@ body:
 
         * For questions, check the [Community Forum](https:/forum.weaviate.io) or ask in [Slack](https://weaviate.io/slack).
         * Before you request a feature read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
-        * Check to make sure someone hasn't already [requested this feature](hhttps://github.com/weaviate/weaviate/issues?q=is:issue+label:"feature+request").
+        * Check to make sure someone hasn't already [requested this feature](https://github.com/weaviate/weaviate/issues?q=is:issue+label:"feature+request").
 
   - type: checkboxes
     id: terms
