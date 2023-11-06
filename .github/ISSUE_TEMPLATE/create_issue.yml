@@ -1,5 +1,5 @@
-name: Create a new issue
-description: Create a new issue to Weaviate Server
+name: Bug Report
+description: Found a bug? Create an issue here.
 labels: ["bug", "triage"]
 body:
   - type: markdown
