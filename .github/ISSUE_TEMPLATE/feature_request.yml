@@ -1,0 +1,38 @@
+name: Feature Request
+description: Missing a Feature? Suggest it here.
+labels: ["feature request", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+
+        * For questions, check the [Community Forum](https:/forum.weaviate.io) or ask in [Slack](https://weaviate.io/slack).
+        * Before you request a feature read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
+        * Check to make sure someone hasn't already [requested this feature](hhttps://github.com/weaviate/weaviate/issues?q=is:issue+label:"feature+request").
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: This project has a Code of Conduct that all participants are expected to understand and follow.
+      options:
+        - label: I have read and agree to the Weaviate's [Contributor Guide](https://weaviate.io/developers/contributor-guide) and [Code of Conduct](https://weaviate.io/service/code-of-conduct)
+          required: true
+
+  - type: input
+    id: server_version
+    attributes:
+      label: Server Version
+      description: |
+        - What Weaviate Version are you running?
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature_request_body
+    attributes:
+      label: Describe your feature request
+      description: |
+        - Describe here your requested feature. Provide all necessary context, use cases and the reasoning on why this feature is a good one.
+    validations:
+      required: true
