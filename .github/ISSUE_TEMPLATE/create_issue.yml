@@ -1,4 +1,5 @@
 name: Found a bug?
+description: Report your bug here.
 labels: ["bug", "triage"]
 body:
   - type: markdown
