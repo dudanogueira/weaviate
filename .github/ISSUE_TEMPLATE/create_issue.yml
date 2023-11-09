@@ -15,7 +15,9 @@ body:
     attributes:
       label: Describe your issue
       description: |
-        - What was the expected behavior? How it is behaving? Can you replicate it in latest version? Paste logs, context information (client version? environment variables?) or instruction on how to reproduce this issue here.
+        * What was the expected behavior? 
+        * How it is behaving? 
+        * Can you replicate it in latest version? Paste logs, context information (client version? environment variables?) or instruction on how to reproduce this issue here.
     validations:
       required: true
 
