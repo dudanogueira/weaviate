@@ -1,5 +1,4 @@
-name: Bug Report
-description: Found a bug? Create an issue here.
+name: Found a bug?
 labels: ["bug", "triage"]
 body:
   - type: markdown
