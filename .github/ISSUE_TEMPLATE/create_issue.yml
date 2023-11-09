@@ -8,7 +8,7 @@ body:
       value: |
         #### Before you get started
         * Check that sure someone hasn't already opened a similar [issue](https://github.com/weaviate/weaviate-io/issues).
-        * Read the [contributor guide](https://weaviate.io/developers/contributor-guide).
+        * Read the [Contributor Guide](https://weaviate.io/developers/contributor-guide) and [Code of Conduct](https://weaviate.io/service/code-of-conduct).
 
   - type: textarea
     id: issue_body
