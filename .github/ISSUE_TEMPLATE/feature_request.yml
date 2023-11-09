@@ -1,5 +1,5 @@
-name: Feature Request
-description: Missing a Feature? Suggest it here.
+name: Missing a Feature?
+description: Suggest it here.
 labels: ["feature request", "triage"]
 body:
   - type: markdown
