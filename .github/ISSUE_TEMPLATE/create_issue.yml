@@ -6,7 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        * Before you file an issue read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
+        * Check to make sure someone hasn't already opened a similar [issue](https://github.com/weaviate/weaviate-io/issues).
+        
 
   - type: textarea
     id: issue_body
@@ -31,7 +32,7 @@ body:
       value: |
 
         * For questions, check the [Community Forum](https:/forum.weaviate.io), or ask in [Slack](https://weaviate.io/slack).
-        * Check to make sure someone hasn't already opened a similar [issue](https://github.com/weaviate/weaviate-io/issues).
+        * Before you file an issue read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
 
   - type: checkboxes
     id: terms
