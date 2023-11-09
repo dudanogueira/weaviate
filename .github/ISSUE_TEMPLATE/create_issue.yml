@@ -32,7 +32,7 @@ body:
       required: true
 
   - type: textarea
-    id: issue_body
+    id: suporting_information
     attributes:
       label: Supporting information
       description: |
