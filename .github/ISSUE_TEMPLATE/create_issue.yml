@@ -36,7 +36,7 @@ body:
     attributes:
       label: Supporting information
       description: |
-      Please, paste any logs, context information (client version? environment variables?) or other details in here.
+        - Please, paste any logs, context information (client version? environment variables?) or other details in here.
     validations:
       required: false
 
