@@ -15,7 +15,7 @@ body:
     attributes:
       label: Describe your issue
       description: |
-        * What was the expected behavior? 
+        * What is the expected behavior? 
         * What is the actual behavior? 
         * Can you replicate it in latest version?
         * How can we reproduce it?
