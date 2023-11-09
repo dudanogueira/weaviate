@@ -19,7 +19,6 @@ body:
         * What is the actual behavior? 
         * Can you replicate it in latest version?
         * How can we reproduce it?
-        * Please, paste any logs, context information (client version? environment variables?) or other details in here.
     validations:
       required: true
 
@@ -31,6 +30,15 @@ body:
         - What Weaviate Version are you running?
     validations:
       required: true
+
+  - type: textarea
+    id: issue_body
+    attributes:
+      label: Supporting information
+      description: |
+      Please, paste any logs, context information (client version? environment variables?) or other details in here.
+    validations:
+      required: false
 
   - type: checkboxes
     id: terms
