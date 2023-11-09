@@ -6,7 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before you get started, check to make sure someone hasn't already opened a similar [issue](https://github.com/weaviate/weaviate-io/issues) and read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
+        ## Before you get started
+        * check to make sure someone hasn't already opened a similar [issue](https://github.com/weaviate/weaviate-io/issues)
+        * read the [Contributing guide](https://weaviate.io/developers/contributor-guide).
 
   - type: textarea
     id: issue_body
