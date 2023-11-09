@@ -26,8 +26,7 @@ body:
     id: server_version
     attributes:
       label: Server Version
-      description: |
-        - What Weaviate Version are you running?
+      description: What Weaviate Version are you running?
     validations:
       required: true
 
@@ -35,8 +34,7 @@ body:
     id: suporting_information
     attributes:
       label: Supporting information
-      description: |
-        - Please, paste any logs, context information (client version? environment variables?) or other details in here.
+      description: Please, paste any logs, context information (client version? environment variables?) or other details in here.
     validations:
       required: false
 
