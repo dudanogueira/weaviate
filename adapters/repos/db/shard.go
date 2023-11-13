@@ -28,6 +28,7 @@ import (
 	"github.com/weaviate/weaviate/adapters/repos/db/inverted"
 	"github.com/weaviate/weaviate/adapters/repos/db/lsmkv"
 	"github.com/weaviate/weaviate/adapters/repos/db/propertyspecific"
+	"github.com/weaviate/weaviate/adapters/repos/db/vector/flat"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/hnsw/distancer"
 	"github.com/weaviate/weaviate/adapters/repos/db/vector/noop"
@@ -36,6 +37,9 @@ import (
 	"github.com/weaviate/weaviate/entities/models"
 	"github.com/weaviate/weaviate/entities/schema"
 	"github.com/weaviate/weaviate/entities/storagestate"
+	"github.com/weaviate/weaviate/entities/vectorindex"
+	"github.com/weaviate/weaviate/entities/vectorindex/common"
+	flatent "github.com/weaviate/weaviate/entities/vectorindex/flat"
 	hnswent "github.com/weaviate/weaviate/entities/vectorindex/hnsw"
 	"github.com/weaviate/weaviate/usecases/monitoring"
 	"golang.org/x/sync/errgroup"
@@ -145,24 +149,16 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 
 	defer s.metrics.ShardStartup(before)
 
-	hnswUserConfig, ok := index.vectorIndexUserConfig.(hnswent.UserConfig)
-	if !ok {
-		return nil, errors.Errorf("hnsw vector index: config is not hnsw.UserConfig: %T",
-			index.vectorIndexUserConfig)
-	}
-
-	if hnswUserConfig.Skip {
-		s.vectorIndex = noop.NewIndex()
-	} else {
-		if err := s.initVectorIndex(ctx, hnswUserConfig); err != nil {
-			return nil, fmt.Errorf("init vector index: %w", err)
-		}
-
-		defer s.vectorIndex.PostStartup()
+	if err := os.MkdirAll(s.path(), os.ModePerm); err != nil {
+		return nil, err
 	}
 
 	if err := s.initNonVector(ctx, class); err != nil {
 		return nil, errors.Wrapf(err, "init shard %q", s.ID())
+	}
+
+	if err := s.initVector(ctx); err != nil {
+		return nil, err
 	}
 
 	var err error
@@ -182,51 +178,99 @@ func NewShard(ctx context.Context, promMetrics *monitoring.PrometheusMetrics,
 	return s, nil
 }
 
-func (s *Shard) initVectorIndex(
-	ctx context.Context, hnswUserConfig hnswent.UserConfig,
-) error {
+func (s *Shard) initVector(ctx context.Context) error {
 	var distProv distancer.Provider
 
-	switch hnswUserConfig.Distance {
-	case "", hnswent.DistanceCosine:
+	switch s.index.vectorIndexUserConfig.DistanceName() {
+	case "", common.DistanceCosine:
 		distProv = distancer.NewCosineDistanceProvider()
-	case hnswent.DistanceDot:
+	case common.DistanceDot:
 		distProv = distancer.NewDotProductProvider()
-	case hnswent.DistanceL2Squared:
+	case common.DistanceL2Squared:
 		distProv = distancer.NewL2SquaredProvider()
-	case hnswent.DistanceManhattan:
+	case common.DistanceManhattan:
 		distProv = distancer.NewManhattanProvider()
-	case hnswent.DistanceHamming:
+	case common.DistanceHamming:
 		distProv = distancer.NewHammingProvider()
 	default:
-		return errors.Errorf("unrecognized distance metric %q,"+
-			"choose one of [\"cosine\", \"dot\", \"l2-squared\", \"manhattan\",\"hamming\"]", hnswUserConfig.Distance)
+		return fmt.Errorf("init vector index: %w",
+			errors.Errorf("unrecognized distance metric %q,"+
+				"choose one of [\"cosine\", \"dot\", \"l2-squared\", \"manhattan\",\"hamming\"]", s.index.vectorIndexUserConfig.DistanceName()))
 	}
 
-	// starts vector cycles if vector is configured
-	s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
-	s.index.cycleCallbacks.vectorTombstoneCleanupCycle.Start()
+	switch s.index.vectorIndexUserConfig.IndexType() {
+	case vectorindex.VectorIndexTypeHNSW:
+		hnswUserConfig, ok := s.index.vectorIndexUserConfig.(hnswent.UserConfig)
+		if !ok {
+			return errors.Errorf("hnsw vector index: config is not hnsw.UserConfig: %T",
+				s.index.vectorIndexUserConfig)
+		}
 
-	vi, err := hnsw.New(hnsw.Config{
-		Logger:               s.index.logger,
-		RootPath:             s.index.Config.RootPath,
-		ID:                   s.ID(),
-		ShardName:            s.name,
-		ClassName:            s.index.Config.ClassName.String(),
-		PrometheusMetrics:    s.promMetrics,
-		VectorForIDThunk:     s.vectorByIndexID,
-		TempVectorForIDThunk: s.readVectorByIndexIDIntoSlice,
-		DistanceProvider:     distProv,
-		MakeCommitLoggerThunk: func() (hnsw.CommitLogger, error) {
-			return hnsw.NewCommitLogger(s.index.Config.RootPath, s.ID(),
-				s.index.logger, s.cycleCallbacks.vectorCommitLoggerCallbacks)
-		},
-	}, hnswUserConfig,
-		s.cycleCallbacks.vectorTombstoneCleanupCallbacks, s.cycleCallbacks.compactionCallbacks, s.cycleCallbacks.flushCallbacks)
-	if err != nil {
-		return errors.Wrapf(err, "init shard %q: hnsw index", s.ID())
+		if hnswUserConfig.Skip {
+			s.vectorIndex = noop.NewIndex()
+		} else {
+			// starts vector cycles if vector is configured
+			s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
+			s.index.cycleCallbacks.vectorTombstoneCleanupCycle.Start()
+
+			// a shard can actually have multiple vector indexes:
+			// - the main index, which is used for all normal object vectors
+			// - a geo property index for each geo prop in the schema
+			//
+			// here we label the main vector index as such.
+			vecIdxID := "main"
+
+			vi, err := hnsw.New(hnsw.Config{
+				Logger:               s.index.logger,
+				RootPath:             s.path(),
+				ID:                   vecIdxID,
+				ShardName:            s.name,
+				ClassName:            s.index.Config.ClassName.String(),
+				PrometheusMetrics:    s.promMetrics,
+				VectorForIDThunk:     s.vectorByIndexID,
+				TempVectorForIDThunk: s.readVectorByIndexIDIntoSlice,
+				DistanceProvider:     distProv,
+				MakeCommitLoggerThunk: func() (hnsw.CommitLogger, error) {
+					return hnsw.NewCommitLogger(s.path(), vecIdxID,
+						s.index.logger, s.cycleCallbacks.vectorCommitLoggerCallbacks)
+				},
+			}, hnswUserConfig,
+				s.cycleCallbacks.vectorTombstoneCleanupCallbacks, s.cycleCallbacks.compactionCallbacks, s.cycleCallbacks.flushCallbacks)
+			if err != nil {
+				return errors.Wrapf(err, "init shard %q: hnsw index", s.ID())
+			}
+			s.vectorIndex = vi
+
+			defer s.vectorIndex.PostStartup()
+		}
+	case vectorindex.VectorIndexTypeFLAT:
+		flatUserConfig, ok := s.index.vectorIndexUserConfig.(flatent.UserConfig)
+		if !ok {
+			return errors.Errorf("flat vector index: config is not flat.UserConfig: %T",
+				s.index.vectorIndexUserConfig)
+		}
+		s.index.cycleCallbacks.vectorCommitLoggerCycle.Start()
+
+		// a shard can actually have multiple vector indexes:
+		// - the main index, which is used for all normal object vectors
+		// - a geo property index for each geo prop in the schema
+		//
+		// here we label the main vector index as such.
+		vecIdxID := "main"
+
+		vi, err := flat.New(flat.Config{
+			ID:               vecIdxID,
+			Logger:           s.index.logger,
+			DistanceProvider: distProv,
+		}, flatUserConfig, s.store)
+		if err != nil {
+			return errors.Wrapf(err, "init shard %q: flat index", s.ID())
+		}
+		s.vectorIndex = vi
+	default:
+		return fmt.Errorf("Unknown vector index type: %q. Choose one from [\"%s\", \"%s\"]",
+			s.index.vectorIndexUserConfig.IndexType(), vectorindex.VectorIndexTypeHNSW, vectorindex.VectorIndexTypeFLAT)
 	}
-	s.vectorIndex = vi
 
 	return nil
 }
@@ -237,21 +281,21 @@ func (s *Shard) initNonVector(ctx context.Context, class *models.Class) error {
 		return errors.Wrapf(err, "init shard %q: shard db", s.ID())
 	}
 
-	counter, err := indexcounter.New(s.ID(), s.index.Config.RootPath)
+	counter, err := indexcounter.New(s.path())
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: index counter", s.ID())
 	}
 	s.counter = counter
 
 	dataPresent := s.counter.PreviewNext() != 0
-	versionPath := path.Join(s.index.Config.RootPath, s.ID()+".version")
+	versionPath := path.Join(s.path(), "version")
 	versioner, err := newShardVersioner(versionPath, dataPresent)
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: check versions", s.ID())
 	}
 	s.versioner = versioner
 
-	plPath := path.Join(s.index.Config.RootPath, s.ID()+".proplengths")
+	plPath := path.Join(s.path(), "proplengths")
 	propLengths, err := inverted.NewJsonPropertyLengthTracker(plPath, s.index.logger)
 	if err != nil {
 		return errors.Wrapf(err, "init shard %q: prop length tracker", s.ID())
@@ -271,8 +315,12 @@ func (s *Shard) ID() string {
 	return fmt.Sprintf("%s_%s", s.index.ID(), s.name)
 }
 
+func (s *Shard) path() string {
+	return path.Join(s.index.path(), s.name)
+}
+
 func (s *Shard) DBPathLSM() string {
-	return fmt.Sprintf("%s/%s_lsm", s.index.Config.RootPath, s.ID())
+	return path.Join(s.path(), "lsm")
 }
 
 func (s *Shard) uuidToIdLockPoolId(idBytes []byte) uint8 {
@@ -292,7 +340,7 @@ func (s *Shard) initLSMStore(ctx context.Context) error {
 		metrics = lsmkv.NewMetrics(s.promMetrics, string(s.index.Config.ClassName), s.name)
 	}
 
-	store, err := lsmkv.New(s.DBPathLSM(), s.index.Config.RootPath, annotatedLogger, metrics,
+	store, err := lsmkv.New(s.DBPathLSM(), s.path(), annotatedLogger, metrics,
 		s.cycleCallbacks.compactionCallbacks, s.cycleCallbacks.flushCallbacks)
 	if err != nil {
 		return errors.Wrapf(err, "init lsmkv store at %s", s.DBPathLSM())
@@ -326,7 +374,7 @@ func (s *Shard) drop() error {
 		s.stopMetrics <- struct{}{}
 		if s.promMetrics != nil {
 			// send 0 in when index gets dropped
-			s.sendVectorDimensionsMetric(0)
+			s.clearDimensionMetrics()
 		}
 	}
 
@@ -593,6 +641,7 @@ func (s *Shard) updateVectorIndexConfig(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("attempt to mark read-only: %w", err)
 	}
+
 	return s.vectorIndex.UpdateUserConfig(updated, func() {
 		s.updateStatus(storagestate.StatusReady.String())
 	})

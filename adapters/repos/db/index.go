@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"runtime"
 	"runtime/debug"
 	golangSort "sort"
@@ -141,15 +142,16 @@ func (m *shardMap) LoadAndDelete(name string) (*Shard, bool) {
 // class. An index can be further broken up into self-contained units, called
 // Shards, to allow for easy distribution across Nodes
 type Index struct {
-	classSearcher         inverted.ClassSearcher // to allow for nested by-references searches
-	shards                shardMap
-	Config                IndexConfig
-	vectorIndexUserConfig schema.VectorIndexConfig
-	getSchema             schemaUC.SchemaGetter
-	logger                logrus.FieldLogger
-	remote                *sharding.RemoteIndex
-	stopwords             *stopwords.Detector
-	replicator            *replica.Replicator
+	classSearcher             inverted.ClassSearcher // to allow for nested by-references searches
+	shards                    shardMap
+	Config                    IndexConfig
+	vectorIndexUserConfig     schema.VectorIndexConfig
+	vectorIndexUserConfigLock sync.Mutex
+	getSchema                 schemaUC.SchemaGetter
+	logger                    logrus.FieldLogger
+	remote                    *sharding.RemoteIndex
+	stopwords                 *stopwords.Detector
+	replicator                *replica.Replicator
 
 	invertedIndexConfig     schema.InvertedIndexConfig
 	invertedIndexConfigLock sync.Mutex
@@ -192,6 +194,10 @@ func (i *Index) GetShards() []*Shard {
 
 func (i *Index) ID() string {
 	return indexID(i.Config.ClassName)
+}
+
+func (i *Index) path() string {
+	return path.Join(i.Config.RootPath, i.ID())
 }
 
 type nodeResolver interface {
@@ -246,7 +252,16 @@ func NewIndex(ctx context.Context, cfg IndexConfig,
 
 	eg := errgroup.Group{}
 	eg.SetLimit(_NUMCPU)
-	for _, shardName := range shardState.AllLocalPhysicalShards() {
+
+	if err := os.MkdirAll(index.path(), os.ModePerm); err != nil {
+		return nil, fmt.Errorf("init index %q: %w", index.ID(), err)
+	}
+
+	for _, shardName := range shardState.AllPhysicalShards() {
+		if !shardState.IsLocalShard(shardName) {
+			// do not create non-local shards
+			continue
+		}
 		physical := shardState.Physical[shardName]
 		if physical.ActivityStatus() != models.TenantActivityStatusHOT {
 			// do not instantiate inactive shard
@@ -347,7 +362,7 @@ func (i *Index) updateVectorIndexConfig(ctx context.Context,
 	updated schema.VectorIndexConfig,
 ) error {
 	// an updated is not specific to one shard, but rather all
-	return i.ForEachShard(func(name string, shard *Shard) error {
+	err := i.ForEachShard(func(name string, shard *Shard) error {
 		// At the moment, we don't do anything in an update that could fail, but
 		// technically this should be part of some sort of a two-phase commit  or
 		// have another way to rollback if we have updates that could potentially
@@ -357,6 +372,15 @@ func (i *Index) updateVectorIndexConfig(ctx context.Context,
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	i.vectorIndexUserConfigLock.Lock()
+	defer i.vectorIndexUserConfigLock.Unlock()
+
+	i.vectorIndexUserConfig = updated
+
+	return nil
 }
 
 func (i *Index) getInvertedIndexConfig() schema.InvertedIndexConfig {
@@ -1554,7 +1578,20 @@ func (i *Index) drop() error {
 	defer i.backupMutex.RUnlock()
 
 	i.shards.Range(dropShard)
-	return eg.Wait()
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+
+	// Dropping the shards only unregisters the shards callbacks, but we still
+	// need to stop the cycle managers that those shards used to register with.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := i.stopCycleManagers(ctx, "drop"); err != nil {
+		return err
+	}
+
+	return os.RemoveAll(i.path())
 }
 
 // dropShards deletes shards in a transactional manner.
@@ -1624,25 +1661,32 @@ func (i *Index) Shutdown(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if err := i.cycleCallbacks.compactionCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop compaction cycle: %w", err)
-	}
-	if err := i.cycleCallbacks.flushCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop flush cycle: %w", err)
-	}
-	if err := i.cycleCallbacks.vectorCommitLoggerCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop vector commit logger cycle: %w", err)
-	}
-	if err := i.cycleCallbacks.vectorTombstoneCleanupCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop vector tombstone cleanup cycle: %w", err)
-	}
-	if err := i.cycleCallbacks.geoPropsCommitLoggerCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop geo props commit logger cycle: %w", err)
-	}
-	if err := i.cycleCallbacks.geoPropsTombstoneCleanupCycle.StopAndWait(ctx); err != nil {
-		return fmt.Errorf("stop geo props tombsobe cleanup cycle: %w", err)
+	if err := i.stopCycleManagers(ctx, "shutdown"); err != nil {
+		return err
 	}
 
+	return nil
+}
+
+func (i *Index) stopCycleManagers(ctx context.Context, usecase string) error {
+	if err := i.cycleCallbacks.compactionCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop compaction cycle: %w", usecase, err)
+	}
+	if err := i.cycleCallbacks.flushCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop flush cycle: %w", usecase, err)
+	}
+	if err := i.cycleCallbacks.vectorCommitLoggerCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop vector commit logger cycle: %w", usecase, err)
+	}
+	if err := i.cycleCallbacks.vectorTombstoneCleanupCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop vector tombstone cleanup cycle: %w", usecase, err)
+	}
+	if err := i.cycleCallbacks.geoPropsCommitLoggerCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop geo props commit logger cycle: %w", usecase, err)
+	}
+	if err := i.cycleCallbacks.geoPropsTombstoneCleanupCycle.StopAndWait(ctx); err != nil {
+		return fmt.Errorf("%s: stop geo props tombstone cleanup cycle: %w", usecase, err)
+	}
 	return nil
 }
 

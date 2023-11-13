@@ -17,7 +17,7 @@ package db
 import (
 	"context"
 	"os"
-	"strings"
+	"path"
 	"testing"
 
 	"github.com/go-openapi/strfmt"
@@ -213,6 +213,17 @@ func TestIndex_DropWithDataAndRecreateWithDataIndex(t *testing.T) {
 		productsIds[1], nil, additional.Properties{}, nil, "")
 	require.Nil(t, err)
 
+	// update the index vectorIndexUserConfig
+	beforeVectorConfig, ok := index.vectorIndexUserConfig.(hnsw.UserConfig)
+	require.Equal(t, -1, beforeVectorConfig.EF)
+	require.True(t, ok)
+	beforeVectorConfig.EF = 99
+	err = index.updateVectorIndexConfig(context.TODO(), beforeVectorConfig)
+	require.Nil(t, err)
+	afterVectorConfig, ok := index.vectorIndexUserConfig.(hnsw.UserConfig)
+	require.True(t, ok)
+	require.Equal(t, 99, afterVectorConfig.EF)
+
 	assert.Equal(t, 6, len(indexFilesBeforeDelete))
 	assert.Equal(t, 0, len(indexFilesAfterDelete))
 	assert.Equal(t, 6, len(indexFilesAfterRecreate))
@@ -338,16 +349,22 @@ func invertedConfig() *models.InvertedIndexConfig {
 	}
 }
 
-func getIndexFilenames(dirName string, className string) ([]string, error) {
-	filenames := []string{}
-	infos, err := os.ReadDir(dirName)
+func getIndexFilenames(rootDir, indexName string) ([]string, error) {
+	var filenames []string
+	indexRoot, err := os.ReadDir(path.Join(rootDir, indexName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			// index was dropped, or never existed
+			return filenames, nil
+		}
+		return nil, err
+	}
+	shardFiles, err := os.ReadDir(path.Join(rootDir, indexName, indexRoot[0].Name()))
 	if err != nil {
 		return filenames, err
 	}
-	for _, i := range infos {
-		if strings.Contains(i.Name(), className) {
-			filenames = append(filenames, i.Name())
-		}
+	for _, f := range shardFiles {
+		filenames = append(filenames, f.Name())
 	}
 	return filenames, nil
 }
