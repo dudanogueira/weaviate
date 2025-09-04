@@ -31,6 +31,7 @@ import (
 	"github.com/weaviate/weaviate/entities/schema"
 	entsentry "github.com/weaviate/weaviate/entities/sentry"
 	"github.com/weaviate/weaviate/entities/vectorindex/common"
+	"github.com/weaviate/weaviate/usecases/build"
 	"github.com/weaviate/weaviate/usecases/cluster"
 	"github.com/weaviate/weaviate/usecases/config/runtime"
 	usagetypes "github.com/weaviate/weaviate/usecases/modulecomponents/usage/types"
@@ -73,8 +74,8 @@ const (
 
 // Flags are input options
 type Flags struct {
-	ConfigFile string `long:"config-file" description:"path to config file (default: ./weaviate.conf.json)"`
-
+	ConfigFile             string   `long:"config-file" description:"path to config file (default: ./weaviate.conf.json)"`
+	Version                bool     `short:"v" long:"version" description:"show version and exit"`
 	RaftPort               int      `long:"raft-port" description:"the port used by Raft for inter-node communication"`
 	RaftInternalRPCPort    int      `long:"raft-internal-rpc-port" description:"the port used for internal RPCs within the cluster"`
 	RaftRPCMessageMaxSize  int      `long:"raft-rpc-message-max-size" description:"maximum internal raft grpc message size in bytes, defaults to 1073741824"`
@@ -644,6 +645,14 @@ func (f *WeaviateConfig) GetHostAddress() string {
 // If a config option is specified multiple times in different locations, the latest one will be used in this order.
 func (f *WeaviateConfig) LoadConfig(flags *swag.CommandLineOptionsGroup, logger logrus.FieldLogger) error {
 	// Get command line flags
+	configFlags := flags.Options.(*Flags)
+
+	// Check version flag FIRST, before any config loading
+	if configFlags.Version {
+		fmt.Printf("weaviate version %s\n", build.Version)
+		os.Exit(0)
+	}
+
 	configFileName := flags.Options.(*Flags).ConfigFile
 	// Set default if not given
 	if configFileName == "" {

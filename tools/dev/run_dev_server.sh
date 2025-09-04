@@ -48,6 +48,9 @@ case $CONFIG in
         --read-timeout=600s \
         --write-timeout=600s
   ;;
+  version)
+      go_run ./cmd/weaviate-server --version
+  ;;
 
   local-single-node)
       CONTEXTIONARY_URL=localhost:9999 \
